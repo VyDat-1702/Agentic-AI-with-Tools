@@ -53,8 +53,8 @@ Response Generation + Disclaimer
 1. **Clone the repository**
 
 ```bash
-git clone <repository-url>
-cd medical-qa-agent
+git clonehttps://github.com/VyDat-1702/Agentic-AI-with-Tools.git
+cd Agentic-AI-with-Tools/
 ```
 
 2. **Install dependencies**
@@ -307,20 +307,3 @@ python Create_vectorDB.py --device cuda --batch_size 128
 - [ ] Add medical image analysis
 - [ ] Support multiple languages
 - [ ] Fine-tune embeddings on medical domain
-
-## License
-
-This project is for educational and informational purposes only. Not intended for clinical use.
-
-## Disclaimer
-
-**IMPORTANT**: This system provides general medical information only and should not be used as a substitute for professional medical advice, diagnosis, or treatment. Always consult with qualified healthcare providers for medical concerns.
-
-## Contact
-
-For questions or issues, please open an issue on GitHub.
-
----
-
-**Built with**: Gemini 2.5 Flash • Qdrant • LangGraph • SentenceTransformers
-Tools

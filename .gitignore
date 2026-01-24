@@ -1,3 +1,4 @@
 .env
 QdrantDB/
 Data/
+__pycache__/
