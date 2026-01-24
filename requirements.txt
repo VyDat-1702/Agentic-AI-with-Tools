@@ -1,0 +1,12 @@
+pandas>=2.3.0
+
+torch>=2.9.0
+sentence-transformers>=2.3.0
+
+qdrant-client>=1.7.0
+
+google-generativeai>=0.8.0
+langgraph>=0.0.25
+
+requests>=2.32.0
+python-dotenv>=1.2.0
