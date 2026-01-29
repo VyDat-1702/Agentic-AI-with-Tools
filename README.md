@@ -1,309 +1,208 @@
-# Medical Q&A Agent with RAG
+# Medical Q&A Agentic System with RAG
 
-A medical information assistant powered by Google Gemini, Qdrant vector database, and LangGraph for agentic workflows. The system uses Retrieval-Augmented Generation (RAG) to answer medical queries from a knowledge base of 16K+ Q&A pairs, with fallback to web search for current information.
+An intelligent medical information assistant powered by **Google Gemini 2.5 Flash**, **Qdrant vector database**, and **LangGraph**. The system uses RAG to answer medical queries from a 16K+ medical Q&A knowledge base with web search fallback.
 
 ## Features
 
-- **Vector Database**: Fast semantic search over medical Q&A using Qdrant
-- **Dual Information Sources**:
-  - Local FAQ retrieval from vector database
-  - Web search fallback via SerpAPI
-- **Agentic Workflow**: LangGraph-powered decision making
-- **Safety First**: Built-in disclaimers and emergency handling
-- **GPU Acceleration**: CUDA support for faster embeddings
+- **Dual Vector Collections**: Medical Q&A and hospital information
+- **Agentic Workflow**: LangGraph-powered autonomous tool selection
+- **Smart Retrieval**: Semantic search with sentence transformers
+- **Web Search Fallback**: SerpAPI for current information
+- **GPU Acceleration**: CUDA support
 
 ## Architecture
 
-```
-User Query
-    ↓
-Agent (Gemini)
-    ↓
-Tool Selection
-    ├─→ get_medical_faq (Primary)
-    └─→ web_search_medical (Fallback)
-    ↓
-Response Generation + Disclaimer
-```
+![Workflow Graph](graph.png)
+
+The system uses LangGraph with conditional routing:
+
+- **Agent**: Analyzes query and decides action
+- **Tools**: Executes retrieval or web search
+- **Routing**: Continues if ACTION found, ends if ANSWER ready
 
 ## Project Structure
 
 ```
 .
-├── Create_vectorDB.py          # Vector database creation script
-├── main.py                      # Agent orchestration and workflow
-├── Tools.py                     # FAQ retriever and web searcher
-├── requirements.txt             # Python dependencies
-├── Data/
-│   └── Comprehensive-Medical-Q&A.csv
-└── QdrantDB/                    # Vector database storage
-    ├── collection/
-    └── meta.json
+├── Create_QdrantDB.py       # Vector database creation
+├── System.py                # Agent orchestration
+├── Tools.py                 # RAG retrieval & web search
+├── Data/                    # CSV data files
+│   ├── Comprehensive-Medical-Q&A.csv
+│   └── Hospital_information.csv
+├── .env                     # API keys
+└── requirements.txt
 ```
+
+## Requirements
+
+- Python 3.8+
+- CUDA (optional, for GPU)
+- Internet connection
 
 ## Installation
 
-### Prerequisites
-
-- Python 3.10+
-- CUDA (optional, for GPU acceleration)
-
-### Setup
-
-1. **Clone the repository**
+### 1. Clone repository
 
 ```bash
-git clonehttps://github.com/VyDat-1702/Agentic-AI-with-Tools.git
+git clone https://github.com/VyDat-1702/Agentic-AI-with-Tools.git
 cd Agentic-AI-with-Tools/
 ```
 
-2. **Install dependencies**
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Configure environment variables**
+Key packages: `qdrant-client`, `sentence-transformers`, `google-generativeai`, `langgraph`, `pandas`, `python-dotenv`, `requests`
 
-Create a `.env` file in the project root:
+### 3. Configure API keys
+
+Create `.env` file:
 
 ```env
 # Required
-GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_API_KEY=your_gemini_api_key
+QDRANT_URL=your_qdrant_url
+QDRANT_API_KEY=your_qdrant_api_key
 
 # Optional
-SERPAPI_KEY=your_serpapi_key_here
-VECTOR_DB_PATH=./QdrantDB
-COLLECTION_NAME=medical_qa_kb
+SERPAPI_KEY=your_serpapi_key
 ```
 
-**Get API Keys:**
+**Get API keys:**
 
-- Gemini API: [Google AI Studio](https://aistudio.google.com/apikey)
-- SerpAPI (optional): [SerpAPI Dashboard](https://serpapi.com/manage-api-key)
+- Gemini: [Google AI Studio](https://aistudio.google.com/apikey)
+- Qdrant: [Qdrant Cloud](https://cloud.qdrant.io/)
+- SerpAPI: [SerpAPI Dashboard](https://serpapi.com/manage-api-key)
 
-4. **Prepare your data**
+### 4. Prepare data
 
-Place your CSV file(s) in the `Data/` directory with these columns:
+Place CSV files in `Data/` folder:
 
-- `Question`: Medical question
-- `Answer`: Corresponding answer
-- `qtype`: Question type/category
+- **Medical Q&A** (filename with "Q&A"): columns `qtype`, `Question`, `Answer`
+- **Hospital info**: columns `Hospital Name`, `Specialty`, `Address`, `Province/City`
 
 ## Usage
 
-### Step 1: Build Vector Database
+### Step 1: Create Vector Database
 
 ```bash
-python Create_vectorDB.py --dir Data --colna medical_qa_kb --qdrant_path QdrantDB
+python Create_QdrantDB.py --data-dir Data
 ```
 
-**Arguments:**
+**Options:**
 
-- `--dir`: Directory containing CSV files (default: `Data`)
-- `--colna`: Collection name (default: `medical_qa_kb`)
-- `--qdrant_path`: Database storage path (default: `QdrantDB`)
-- `--device`: Device for embeddings - `auto`, `cuda`, or `cpu` (default: `auto`)
-- `--batch_size`: Encoding batch size (default: 32, use 64-128 for GPU)
+- `--qdrant-url`: Qdrant instance URL
+- `--api-key`: Qdrant API key
+- `--data-dir`: CSV files directory (default: `Data`)
+- `--model`: Embedding model (default: `all-MiniLM-L6-v2`)
 
-**Example with GPU:**
+Creates two collections:
+
+- `Comprehensive-Medical-QA` (for Q&A data)
+- `Hospital_infomation` (for hospital data)
+
+### Step 2: Run Agent
 
 ```bash
-python Create_vectorDB.py --device cuda --batch_size 128
+python System.py
 ```
 
-### Step 2: Run the Agent
+**Interactive mode:**
 
-```bash
-python main.py
 ```
+User: What are symptoms of diabetes?
+Bot: [Answer with medical disclaimer]
 
-The script will run test queries automatically. You can modify the queries in `main.py`:
-
-```python
-queries = [
-    "What are symptoms of diabetes?",
-    "How to prevent heart disease?",
-    "Latest COVID-19 treatment options?",
-]
-```
-
-### Custom Queries
-
-Modify the `main()` function in `main.py`:
-
-```python
-def main():
-    initialize_tools()
-    graph = build_graph()
-
-    # Your custom query
-    run_query("What are the side effects of aspirin?", graph)
+Type 'quit', 'exit', or 'esc' to stop.
 ```
 
 ## Components
 
-### 1. Create_vectorDB.py
+### Create_QdrantDB.py
 
-**Purpose**: Creates and indexes medical Q&A into Qdrant vector database
+- Ingests CSV data into Qdrant vector database
+- Uses `all-MiniLM-L6-v2` for embeddings (384 dimensions)
+- Batch processing: 128 for encoding, 64 for upload
+- Auto-detects data type (Q&A vs Hospital) from filename
 
-**Key Functions:**
+### Tools.py
 
-- `load_csvs_from_dir()`: Load CSV files from directory
-- `prepare_documents()`: Combine Q&A into searchable text
-- `create_vector_db()`: Encode and store in Qdrant
-- `search_kb()`: Test semantic search
+- **QA_Retriever**: Searches medical FAQ knowledge base
+- **WebSearcher**: Searches web via SerpAPI
+- Returns context, source, and results for agent
 
-**Embedding Model**: `all-MiniLM-L6-v2` (384 dimensions)
+### System.py
 
-### 2. Tools.py
-
-**Purpose**: Provides search tools for the agent
-
-**Classes:**
-
-- `FAQRetriever`: Searches local vector database
-- `WebSearcher`: Searches web via SerpAPI
-
-**Functions:**
-
-- `get_medical_faq(query)`: Primary search tool
-- `web_search_medical(query)`: Fallback web search
-
-### 3. main.py
-
-**Purpose**: Agent orchestration using LangGraph
-
-**Workflow:**
-
-1. **Agent Node**: Analyzes query, decides on tool
-2. **Tool Node**: Executes selected tool
-3. **Decision**: Continue or provide final answer
-
-**Agent Instructions:**
-
-- Always provide safety disclaimers
-- Never diagnose or prescribe
-- Try FAQ search first
-- Use web search if FAQ insufficient
+- **Gemini wrapper**: Calls Gemini 2.5 Flash (temp=0, max_tokens=1024)
+- **LangGraph workflow**: Agent → Tools → Decision loop
+- **State management**: Tracks query, observations, and steps (max 10)
+- **Routing logic**: Continues on ACTION, ends on ANSWER
 
 ## Configuration
 
-### Config Class (Tools.py)
+**Environment Variables:**
 
-```python
-@dataclass
-class Config:
-    VECTOR_DB_PATH: str = "./QdrantDB"
-    COLLECTION_NAME: str = "medical_qa_kb"
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    FAQ_TOP_K: int = 3
-    WEB_SEARCH_NUM: int = 3
-    DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
+```env
+GEMINI_API_KEY          # Google Gemini API
+QDRANT_URL              # Qdrant instance URL
+QDRANT_API_KEY          # Qdrant authentication
+SERPAPI_KEY             # Optional, for web search
 ```
 
-### Gemini Settings (main.py)
+**Key Settings:**
 
-```python
-generation_config=genai.types.GenerationConfig(
-    temperature=0.1,        # Low for factual responses
-    max_output_tokens=1024,
-)
-```
+- Embedding: `all-MiniLM-L6-v2` (384D)
+- LLM: Gemini 2.5 Flash (temp=0)
+- Top-K results: 3
+- Max agent steps: 10
+- Device: Auto-detect CUDA/CPU
 
 ## Safety Features
 
-The agent includes several safety mechanisms:
-
-1. **Mandatory Disclaimer**: Every response includes "This is for informational purposes only. Consult a healthcare professional."
-
-2. **No Diagnosis/Prescription**: Agent refuses to diagnose conditions or prescribe medications
-
-3. **Emergency Handling**: For emergency symptoms, advises calling 115 or visiting ER
-
-4. **Step Limit**: Maximum 10 reasoning steps to prevent infinite loops
-
-## Example Output
-
-```
-💬 USER: What are symptoms of diabetes?
-
-🤖 AGENT (Step 1)
-THOUGHT: This is a common medical question that should be in the FAQ database
-ACTION: get_medical_faq
-ARGUMENTS: {"query": "symptoms of diabetes"}
-
-⚙️ EXECUTING TOOL
-Tool: get_medical_faq
-Found 3 results
-
-🤖 AGENT (Step 2)
-THOUGHT: I have sufficient information from the FAQ database
-ANSWER: Common symptoms of diabetes include:
-- Increased thirst and frequent urination
-- Extreme hunger
-- Unexplained weight loss
-- Fatigue
-- Blurred vision
-- Slow-healing sores
-- Frequent infections
-
-This is for informational purposes only. Consult a healthcare professional
-for proper diagnosis and treatment.
-```
+- Medical disclaimers in all responses
+- Does NOT diagnose or prescribe
+- Emergency handling (advises calling 115)
+- Max 10 steps to prevent loops
 
 ## Troubleshooting
 
-### "Vector DB not found" Error
-
-```bash
-# Run the vector DB creation script first
-python Create_vectorDB.py
-```
-
-### "GEMINI_API_KEY not found" Error
-
-```bash
-# Add your API key to .env file
-echo "GEMINI_API_KEY=your_key_here" > .env
-```
-
-### Slow Performance
-
-```bash
-# Use GPU acceleration
-python Create_vectorDB.py --device cuda --batch_size 128
-```
-
-### Web Search Not Working
-
-- Check if `SERPAPI_KEY` is set in `.env`
-- The system will still work with FAQ-only mode
+| Issue                    | Solution                                               |
+| ------------------------ | ------------------------------------------------------ |
+| Qdrant connection failed | Check `.env` for correct URL (must include `https://`) |
+| Collection not found     | Run `python Create_QdrantDB.py` first                  |
+| GEMINI_API_KEY not found | Add key to `.env` file                                 |
+| Slow performance         | Use GPU: system auto-detects CUDA                      |
+| Web search not working   | Add `SERPAPI_KEY` (optional, works without it)         |
+| No CSV files found       | Place CSV files in `Data/` directory                   |
 
 ## Performance
 
-**Vector Database Creation:**
+**Database Creation:**
 
-- CPU: ~2-5 minutes for 16K documents
-- GPU (CUDA): ~30-60 seconds
+- CPU: ~3-5 min (16K docs)
+- GPU: ~1-2 min (16K docs)
 
-**Query Response Time:**
+**Query Response:**
 
-- FAQ search: ~100-300ms
-- With web search: ~2-5 seconds
+- FAQ search: 100-300ms
+- With web search: 3-7s
 
 ## Limitations
 
-- Requires internet for Gemini API and web search
-- Vector DB must be rebuilt if data changes
-- SerpAPI has rate limits (100 searches/month free tier)
-- Responses are informational only, not medical advice
+- Not FDA approved or medically certified
+- FAQ database requires manual updates
+- SerpAPI rate limits (100/month free)
+- Responses are informational only
 
 ## Future Improvements
 
-- [ ] Add conversation memory
-- [ ] Support multi-turn dialogues
-- [ ] Implement source citation
-- [ ] Add medical image analysis
-- [ ] Support multiple languages
-- [ ] Fine-tune embeddings on medical domain
+- [ ] Conversation memory
+- [ ] Multi-language support
+- [ ] Web UI (Streamlit/Gradio)
+- [ ] Medical image analysis
+- [ ] Fine-tuned medical embeddings
+
+---

@@ -1,125 +1,107 @@
-import pandas as pd
-import requests
 import os
-from pathlib import Path
-from typing import Dict, Optional
-from dataclasses import dataclass
-from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
 import torch
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
+from typing import Optional, Dict
+import logging
+import requests
 
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-@dataclass
-class Config:
-    # Qdrant settings
-    VECTOR_DB_PATH: str = os.getenv("VECTOR_DB_PATH", "./QdrantDB")
-    COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "medical_qa_kb")
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+class Config():
+    QDRANT_URL: str = os.getenv('QDRANT_URL')
+    QDRANT_API_KEY: str = os.getenv('QDRANT_API_KEY')
+    COLLECTIONS: str = os.getenv('COLLECTIONS')
+    EMBEDDING_MODEL: str = 'all-MiniLM-L6-v2'
     
-    # Search settings
-    FAQ_TOP_K: int = 5
-    WEB_SEARCH_NUM: int = 3
-    
-    # API keys from environment
-    SERPAPI_KEY: str = os.getenv("SERPAPI_KEY", "")
-    
-    # Device
-    DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
+    TOP_K: int = 3
+    WEB_SEARCH_NUM: int = 5
 
-class FAQRetriever:
-    def __init__(self, config: Config = Config()):
+    SERPAPI_KEY: str = os.getenv('SERPAPI_KEY')
+    
+    DEVICE: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+class QA_Retriever:
+    def __init__(self, config):
         self.config = config
-        
-        if not Path(config.VECTOR_DB_PATH).exists():
-            raise FileNotFoundError(
-                f"Vector DB not found at: {config.VECTOR_DB_PATH}\n"
-                f"Please run Create_vectorDB.py first!"
+        self.qdrant_client = QdrantClient(
+            url=config.QDRANT_URL, 
+            api_key=config.QDRANT_API_KEY
             )
-
-        self.client = QdrantClient(path=config.VECTOR_DB_PATH)
-        
-
+        for i in self.qdrant_client.get_collections():
+            logger.info(f'Connect to {i} collection')
+            
         self.encoder = SentenceTransformer(
-            config.EMBEDDING_MODEL,
+            model_name_or_path=config.EMBEDDING_MODEL,
             device=config.DEVICE
         )
         
-
-        try:
-            collection_info = self.client.get_collection(config.COLLECTION_NAME)
-            print(f" Connected to collection '{config.COLLECTION_NAME}'")
-            print(f" Documents: {collection_info.points_count}")
-        except Exception as e:
-            raise ValueError(
-                f" Collection '{config.COLLECTION_NAME}' not found!\n"
-                f"   Error: {e}"
-            )
-    
     def search(self, query: str, top_k: Optional[int] = None) -> Dict:
-        if top_k is None:
-            top_k = self.config.FAQ_TOP_K
-        
         try:
-            # Encode query
             query_vector = self.encoder.encode(
-                query,
-                convert_to_numpy=True
+                sentences=query,
+                convert_to_tensor=(self.config.DEVICE == 'cuda'),
+                convert_to_numpy=(self.config.DEVICE =='cpu'),
+                batch_size=128,
+                normalize_embeddings=True,
+                show_progress_bar=True,
+                device=self.config.DEVICE,
             ).tolist()
             
-            # Search Qdrant
-            results = self.client.query_points(
-                collection_name=self.config.COLLECTION_NAME,
+            results = self.qdrant_client.query_points(
+                collection_name='Comprehensive-Medical-QA',
                 query=query_vector,
-                limit=top_k
+                limit=top_k if top_k is not None else self.config.TOP_K,
             ).points
             
             if not results:
                 return {
-                    "context": "No relevant FAQ found",
-                    "source": "Medical FAQ KB",
-                    "results": []
+                'context': 'No relevant QA found',
+                'source': 'Medical QA KB',
+                'result': []
                 }
+                
+            context_parts=[]
+            results_details = []
             
-            # Format context
-            context_parts = []
-            result_details = []
-            
-            for i, result in enumerate(results, 1):
-                question = result.payload.get('question', 'N/A')
-                answer = result.payload.get('answer', 'N/A')
-                qtype = result.payload.get('qtype', 'general')
-                score = result.score
+            for i, point in enumerate(results, 1):
+                score = point.score
+                text = point.payload.get('Text', 'N/A')
                 
                 context_parts.append(
-                    f"[{i}] Q: {question}\n    A: {answer}\n    Type: {qtype} | Score: {score:.3f}"
+                    f'[{i}] | Score: {score:.3f} | {text}'
                 )
-                
-                result_details.append({
-                    "question": question,
-                    "answer": answer,
-                    "type": qtype,
-                    "score": score
-                })
-            
-            context = "\n\n".join(context_parts)
+                results_details.append({
+                    'Question': point.payload.get('Question', 'N/A'),
+                    'Answer': point.payload.get('Answer', 'N/A'),
+                    'qtype': point.payload.get('qtype', 'N/A'),
+                    'score': score
+                }
+                )
+            context = '\n\n'.join(context_parts)
             
             return {
-                "context": context,
-                "source": "Medical FAQ KB (Qdrant)",
-                "results": result_details,
-                "top_score": results[0].score
+                'context': context, #context for LLM, save token
+                'source': 'Comprehensive-Medical-QA', #citations
+                'results': results_details, #for displaydisplay UI
+                'top_score': results[0].score
             }
-            
+        
         except Exception as e:
-            print(f" FAQ search error: {e}")
+            logger.info(f'QA search ERROR: {str(e)}')
             return {
-                "context": f"FAQ search error: {str(e)}",
-                "source": "Error",
-                "results": []
+                'contextf': f'QA seech error: {str(e)}',
+                'source': 'Error',
+                'result': []
             }
-
+            
+            
 class WebSearcher:
 
     def __init__(self, config: Config = Config()):
@@ -128,7 +110,7 @@ class WebSearcher:
         self.url = "https://serpapi.com/search"
         
         if not self.api_key:
-            print("  Warning: SERPAPI_KEY not found in .env file")
+            logger.info("Warning: SERPAPI_KEY not found in .env file")
     
     def search(self, query: str) -> Dict:   
         if not self.api_key:
@@ -168,97 +150,39 @@ class WebSearcher:
             }
             
         except Exception as e:
-            print(f" Web search error: {e}")
+            logger.info(f" Web search error: {e}")
             return {
                 "context": f"Web search unavailable: {str(e)}",
                 "source": "Web Search Error",
                 "num_results": 0
             }
+            
+config_arg = Config()
 
+def get_qa_retriever(query: str) -> Dict:
+    global config_arg
+    return QA_Retriever(config_arg).search(query)
 
-_config = Config()
-faq_retriever: Optional[FAQRetriever] = None
-web_searcher = WebSearcher(_config)
-
-
-def initialize_tools():
-    """Initialize global tools"""
-    global faq_retriever, web_searcher, _config
+def get_web_search(query: str) -> Dict:
+    global config_arg
+    return WebSearcher(config_arg).search(query)
     
-    print(" Initializing tools...")
-    
-    try:
-        faq_retriever = FAQRetriever(_config)
-    except Exception as e:
-        print(f" FAQ Retriever failed: {e}")
-        faq_retriever = None
-    
-    web_searcher = WebSearcher(_config)
-    print(" Web Searcher initialized")
-
-
-def get_medical_faq(query: str) -> Dict:
-    print(f"TOOL CALL: FAQ SEARCH")
-    print(f"Query: {query}")
-    
-    if faq_retriever is None:
-        return {
-            "context": " FAQ not initialized",
-            "source": "Error"
-        }
-    
-    result = faq_retriever.search(query)
-    print(f"Found {len(result.get('results', []))} results")
-    
-    return result
-
-
-def web_search_medical(query: str) -> Dict:
-
-    print(f"TOOL CALL: WEB SEARCH")
-    print(f"Query: {query}")
-    
-    result = web_searcher.search(query)
-    print(f"Found {result.get('num_results', 0)} results")
-    
-    return result
-
-TOOLS_MAPPING_2_FUNCTIONS = {
-    "get_medical_faq": get_medical_faq,
-    "web_search_medical": web_search_medical
+TOOLS_MAPPING_TO_FUNC = {
+    'get_qa_retriever': get_qa_retriever,
+    'get_web_search': get_web_search
 }
 
-TOOLS_DESCRIPTION = """Available Medical Tools:
-
-1. get_medical_faq(query: str) -> dict
-   Description: Search 16K+ medical Q&A in vector database
-   Use: ALWAYS try this FIRST for any medical question
-   Arguments: query (str) - medical question or symptom
-   Returns: FAQ answers with relevance scores
-
-2. web_search_medical(query: str) -> dict
-   Description: Search web for current medical information
-   Use: When FAQ insufficient or need recent updates
-   Arguments: query (str) - medical topic
-   Returns: Web search results
-
-Strategy: FAQ first → Web search if needed
-"""
-
-
-if __name__ == "__main__":
-    print("TESTING MEDICAL TOOLS")
-    
-    initialize_tools()
-    
-    print()
-    print("TEST 1: FAQ Search")
-    
-    result = get_medical_faq("What are symptoms of diabetes?")
-    print(f"\nContext preview:\n{result['context'][:300]}...")
-    
-    print()
-    print("TEST 2: Web Search")
-    
-    result = web_search_medical("Latest COVID treatment 2025")
-    print(f"\nResults: {result.get('num_results', 0)}")
+AGENT_TOOLS_LIST = {
+    'TOOLS': [
+        {
+            'name': 'get_qa_retriever',
+            'description': 'Retrieve relevant Medical QA in knowledge base.',
+            'args': 'query(str)'
+        },
+        {
+            'name': 'get_web_search',
+            'description': 'Search relevant information from website',
+            'args': 'query (str)'
+        }
+    ]
+}
