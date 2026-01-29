@@ -36,7 +36,7 @@ The system uses LangGraph with conditional routing:
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 - CUDA (optional, for GPU)
 - Internet connection
 
@@ -62,12 +62,10 @@ Key packages: `qdrant-client`, `sentence-transformers`, `google-generativeai`, `
 Create `.env` file:
 
 ```env
-# Required
 GEMINI_API_KEY=your_gemini_api_key
 QDRANT_URL=your_qdrant_url
 QDRANT_API_KEY=your_qdrant_api_key
 
-# Optional
 SERPAPI_KEY=your_serpapi_key
 ```
 
