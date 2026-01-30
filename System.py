@@ -56,35 +56,37 @@ def build_tools_list() -> str:
 
 
 AGENT_INSTRUCTION = """
-Role: Main agent
+Role: Medical Information Assistant
 
-Instructions:
-1. Always start with THOUGHT, then decide on ACTION (RETRIEVE knowledge or SEARCH on website) or ANSWER like FRIENDLY ASSISTANT.
-2. Carefully check past tool_observations to see if the answer is already available.
-3. If not, choose the most relevant tool to gather more information.
+CRITICAL RULES:
+1. FIRST, check if PAST TOOL OBSERVATIONS already contains the answer
+2. If observations have relevant information → PROVIDE ANSWER IMMEDIATELY
+3. Only call tools if you truly need MORE information
+4. NEVER call the same tool twice with similar queries
 
 WORKFLOW:
-1. THOUGHT: Analyze what to do
-2. ACTION: get_medical_faq (try FIRST) or web_search_medical
-3. Review PAST TOOL OBSERVATIONS
-4. When sufficient info → provide ANSWER
+Step 1: Read PAST TOOL OBSERVATIONS carefully
+Step 2: Decide:
+   - Has answer? → Write ANSWER
+   - Need info? → Call get_qa_retriever (try FIRST)
+   - FAQ failed? → Call get_web_search
 
-FORMAT:
-THOUGHT: [Your reasoning]
-ACTION: [tool_name]
-ARGUMENTS: {"query": "..."}
+OUTPUT FORMAT:
 
-OR:
+If you have enough information:
+THOUGHT: [Explain why you can answer based on past observations]
+ANSWER: [Your detailed answer with medical disclaimer]
 
-THOUGHT: [Why ready to answer]
-ANSWER: [Complete response with disclaimer]
+If you need to use a tool:
+THOUGHT: [Explain what information is missing]
+ACTION: [get_qa_retriever or get_web_search]
+ARGUMENTS: {"query": "specific search query"}
 
-RULES:
+MANDATORY RULES:
 - ARGUMENTS must be valid JSON with double quotes
-- Check PAST TOOL OBSERVATIONS before calling tools again
-- Use get_medical_faq FIRST (16K+ Q&A database)
-- Use web_search_medical only if FAQ insufficient
-- Always end ANSWER with safety disclaimer
+- If PAST TOOL OBSERVATIONS contains relevant results → ANSWER NOW, don't call tools again
+- Each tool should only be called ONCE per query unless you get an error
+- Always end ANSWER with: " This is for informational purposes only. Please consult a healthcare professional for medical advice."
 """
 
 
@@ -106,6 +108,15 @@ def call_agent(state: AgentState) -> AgentState:
     
     tools_list = build_tools_list()
     
+    # Count how many times each tool was called
+    tool_calls_count = {}
+    for obs in state.get('tool_observations', []):
+        if 'TOOL:' in obs:
+            tool_name = obs.split('TOOL:')[1].split('\n')[0].strip()
+            tool_calls_count[tool_name] = tool_calls_count.get(tool_name, 0) + 1
+    
+    tools_used = ', '.join([f"{k}: {v}x" for k, v in tool_calls_count.items()]) if tool_calls_count else "None"
+    
     prompt = f"""
 {AGENT_INSTRUCTION}
 
@@ -113,8 +124,12 @@ def call_agent(state: AgentState) -> AgentState:
 
 USER QUERY: {state.get('query')}
 
+TOOLS ALREADY USED: {tools_used}
+
 PAST TOOL OBSERVATIONS: 
 {observations}
+
+ IMPORTANT: If the observations above contain relevant information, ANSWER NOW. Do not call tools again unless absolutely necessary.
 
 Respond now:
 """
@@ -187,18 +202,18 @@ def should_continue(state: AgentState) -> str:
     response = state.get("last_agent_response", "").upper()
     
     if "ANSWER:" in response:
-        print("→ Routing to END (found ANSWER)")
+        print("Routing to END (found ANSWER)")
         return "end"
     
     if "ACTION:" in response:
-        print("→ Routing to TOOLS (found ACTION)")
+        print("Routing to TOOLS (found ACTION)")
         return "continue"
     
-    if state.get("num_steps", 0) >= 10:
+    if state.get("num_steps", 0) >= 5:
         print("→ Routing to END (max steps reached)")
         return "end"
     
-    print("→ Routing to END (no action found)")
+    print("Routing to END (no action found)")
     return "end"
 
 
