@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer
 import torch
 import os
 from dotenv import load_dotenv
+from uuid import uuid5, NAMESPACE_DNS
 import logging
 
 load_dotenv()
@@ -99,7 +100,7 @@ def create_vector_db(df, collection_name, batch_size):
     
     for idx, (text, embedding) in enumerate(zip(texts, embeddings)):
         point = PointStruct(
-            id=idx,
+            id=str(uuid5(NAMESPACE_DNS, text)),
             vector=embedding.tolist(),
             payload={
                 "text": text,
