@@ -87,7 +87,7 @@ Place CSV files in `Data/` folder:
 ### Step 1: Create Vector Database
 
 ```bash
-python Create_vectorDB.py \
+python3 Create_vectorDB.py \
     --dir Data \
     --collection medical_qa_kb \
     --batch_size 128 \
@@ -97,20 +97,20 @@ python Create_vectorDB.py \
 
 **Options:**
 
-- `--qdrant-url`: Qdrant instance URL
-- `--api-key`: Qdrant API key
-- `--data-dir`: CSV files directory (default: `Data`)
-- `--model`: Embedding model (default: `all-MiniLM-L6-v2`)
+- `--dir`: Your data directory
+- `--collection`: collection name
+- `--batch_size`: embedding batch size
+- `--upload_batch_size`: upload batch
+- `--max_worker`: max num worker
 
-Creates two collections:
+Creates collections:
 
 - `Comprehensive-Medical-QA` (for Q&A data)
-- `Hospital_infomation` (for hospital data)
 
 ### Step 2: Run Agent
 
 ```bash
-python System.py
+python3 System.py
 ```
 
 **Interactive mode:**
@@ -128,7 +128,7 @@ Type 'quit', 'exit', or 'esc' to stop.
 
 - Ingests CSV data into Qdrant vector database
 - Uses `all-MiniLM-L6-v2` for embeddings (384 dimensions)
-- Batch processing: 128 for encoding, 64 for upload
+- Batch processing: 128 for encoding, 128 for upload
 - Auto-detects data type (Q&A vs Hospital) from filename
 
 ### Tools.py
@@ -191,7 +191,7 @@ SERPAPI_KEY             # Optional, for web search
 **Query Response:**
 
 - FAQ search: 100-300ms
-- With web search: 3-7s
+- With web search: 1-3s
 
 ## Limitations
 
