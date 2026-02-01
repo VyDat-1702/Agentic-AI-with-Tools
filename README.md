@@ -87,7 +87,12 @@ Place CSV files in `Data/` folder:
 ### Step 1: Create Vector Database
 
 ```bash
-python Create_QdrantDB.py --data-dir Data
+python Create_vectorDB.py \
+    --dir Data \
+    --collection medical_qa_kb \
+    --batch_size 128 \
+    --upload_batch_size 128 \
+    --max_workers 2 \
 ```
 
 **Options:**

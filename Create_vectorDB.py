@@ -3,27 +3,44 @@ import json
 from pathlib import Path
 import argparse
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct
 from sentence_transformers import SentenceTransformer
 import torch
+import os
+from dotenv import load_dotenv
+import logging
 
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+load_dotenv()
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f" Using device: {DEVICE}")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class Config:
+    QDRANT_URL = os.getenv('QDRANT_URL')
+    QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')
+    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+config = Config()
+
+logger.info(f"Using device: {config.DEVICE}")
+logger.info(f"Qdrant URL: {config.QDRANT_URL}")
 
 
 def load_csvs_from_dir(directory):
     csv_files = list(Path(directory).glob("*.csv"))
     
     if not csv_files:
-        raise FileNotFoundError(f"Không tìm thấy CSV nào trong {directory}")
+        raise FileNotFoundError(f"No CSV files found in {directory}")
     
-    print(f" Found {len(csv_files)} file(s) CSV")
+    logger.info(f"Found {len(csv_files)} CSV file(s)")
     
     dfs = []
     for file in csv_files:
-        print(f"   ├─ {file.name}")
+        logger.info(f"  ├─ Loading {file.name}")
         dfs.append(pd.read_csv(file))
     
     return pd.concat(dfs, ignore_index=True)
@@ -33,7 +50,7 @@ def prepare_documents(df):
     required_cols = ['Question', 'Answer', 'qtype']
     
     if not all(col in df.columns for col in required_cols):
-        raise ValueError(f"CSV phải có các cột: {required_cols}")
+        raise ValueError(f"CSV must have columns: {required_cols}")
     
     df['combined_text'] = (
         "Question: " + df['Question'].astype(str) + ". " +
@@ -41,38 +58,43 @@ def prepare_documents(df):
         "Type: " + df['qtype'].astype(str) + "."
     )
     
-    return df
+    logger.info(f"Prepared {len(df)} documents")
+    return df 
 
 
-def create_vector_db(df, collection_name, qdrant_path=":memory:", device=DEVICE, batch_size=32):
+def create_vector_db(df, collection_name, batch_size):
+
+    client = QdrantClient(
+        url=config.QDRANT_URL,
+        api_key=config.QDRANT_API_KEY,
+    )
+    logger.info("Connected to Qdrant Cloud")
     
-    client = QdrantClient(path=qdrant_path)
-    encoder = SentenceTransformer(EMBEDDING_MODEL, device=device)
-    
-    print(f" Encoder running on: {encoder.device}")
+    encoder = SentenceTransformer(config.EMBEDDING_MODEL, device=config.DEVICE)
+    logger.info(f"Encoder running on: {encoder.device}")
 
     try:
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
-                size=384,
+                size=384,  
                 distance=Distance.COSINE
             )
         )
-        print(f" Created collection: {collection_name}")
+        logger.info(f"Created collection: {collection_name}")
     except Exception as e:
-        print(f"  Collection already exists: {e}")
+        logger.warning(f"Collection already exists or error: {e}")
 
     points = []
     texts = df['combined_text'].tolist()
     
-    print(f" Encoding {len(texts)} documents...")
+    logger.info(f"Encoding {len(texts)} documents...")
     embeddings = encoder.encode(
         texts,
         batch_size=batch_size, 
         show_progress_bar=True,
         convert_to_numpy=True,
-        device=device
+        device=config.DEVICE
     )
     
     for idx, (text, embedding) in enumerate(zip(texts, embeddings)):
@@ -88,91 +110,43 @@ def create_vector_db(df, collection_name, qdrant_path=":memory:", device=DEVICE,
         )
         points.append(point)
     
-    client.upsert(
+    logger.info(f"Uploading {len(points)} points to Qdrant Cloud...")
+    client.upload_points(
         collection_name=collection_name,
-        points=points
+        points=points,
+        batch_size=43,
+        parallel=4,
+        wait=True,
     )
     
-    print(f" Add {len(points)} documents to collection '{collection_name}'")
+    logger.info(f"Successfully added {len(points)} documents to collection '{collection_name}'")
     
-    return client, encoder
 
 
-def search_kb(client, encoder, collection_name, query, n_results=5):
-    query_vector = encoder.encode(query, convert_to_numpy=True).tolist()
-    
-    results = client.query_points(
-        collection_name=collection_name,
-        query=query_vector,
-        limit=n_results
-    ).points 
-    
-    formatted_results = {
-        "ids": [[r.id for r in results]],
-        "scores": [[r.score for r in results]],
-        "documents": [[r.payload.get("text", "") for r in results]],
-        "metadatas": [[{
-            "question": r.payload.get("question", ""),
-            "answer": r.payload.get("answer", ""),
-            "qtype": r.payload.get("qtype", "")
-        } for r in results]]
-    }
-    
-    return formatted_results, results
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Medical Q&A KB with Qdrant')
+def main():
+    parser = argparse.ArgumentParser(description='Medical Q&A KB with Qdrant Cloud')
     parser.add_argument('--dir', type=str, default='Data',
                         help='Directory containing CSV files')
-    parser.add_argument('--colna', type=str, default='medical_qa_kb',
-                        help='Collection name')
-    parser.add_argument('--qdrant_path', type=str, default='QdrantDB',
-                        help='Qdrant storage path')
-    parser.add_argument('--device', type=str, default='auto',
-                        choices=['auto', 'cuda', 'cpu'],
-                        help='Device for embedding model')
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--collection', type=str, default='medical_qa_kb',
+                        help='Collection name in Qdrant')
+    parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for encoding (GPU: 64-128, CPU: 16-32)')
+    parser.add_argument('--test', action='store_true',
+                        help='Run test search after uploading')
     args = parser.parse_args()
+
+    if not config.QDRANT_URL or not config.QDRANT_API_KEY:
+        raise ValueError("QDRANT_URL and QDRANT_API_KEY must be set in .env file")
     
-    if args.device == 'auto':
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = args.device
-    
-    print(f"\n Selected device: {device.upper()}")
-    
-    print("\n Loading data...")
     df = load_csvs_from_dir(args.dir)
-    print(f" Total records: {len(df)}\n")
     
     df = prepare_documents(df)
     
-    print("\n Building vector database...")
-    client, encoder = create_vector_db(
+
+    create_vector_db(
         df, 
-        args.colna, 
-        args.qdrant_path,
-        device=device,
+        args.collection,
         batch_size=args.batch_size
     )
-    
-    print("\n Testing search...")
-    query = "What are the most common symptoms of diabetes?"
-    formatted_results, raw_results = search_kb(client, encoder, args.colna, query)
-    
-    print(f"\n Query: {query}")
-    print("\n Top 3 Results:")
-    print()
-    
-    for i, (meta, score) in enumerate(zip(formatted_results['metadatas'][0][:3], 
-                                           formatted_results['scores'][0][:3]), 1):
-        print(f"\n{i}. [Score: {score:.4f}]")
-        print(f"   Q: {meta['question'][:100]}...")
-        print(f"   A: {meta['answer'][:150]}...")
-        print(f"   Type: {meta['qtype']}")
-    
-    print()
-    print(f" Done! Collection '{args.colna}' ready on {device.upper()}")
-    print(f" Saved to: {args.qdrant_path}")
+if __name__ == '__main__':
+    main()
