@@ -48,19 +48,15 @@ def load_csvs_from_dir(directory):
 
 
 def prepare_documents(df):
-    required_cols = ['Question', 'Answer', 'qtype']
-    
-    if not all(col in df.columns for col in required_cols):
-        raise ValueError(f"CSV must have columns: {required_cols}")
-    
-    df['combined_text'] = (
-        "Question: " + df['Question'].astype(str) + ". " +
-        "Answer: " + df['Answer'].astype(str) + ". " +
-        "Type: " + df['qtype'].astype(str) + "."
+    df = df.fillna("")
+
+    df['combined'] = df.apply(
+        lambda row: ". ".join(
+            f"{col}: {row[col]}" for col in df.columns
+        ),
+        axis=1
     )
-    
-    logger.info(f"Prepared {len(df)} documents")
-    return df 
+    return df
 
 
 def create_vector_db(df, collection_name, batch_size):
@@ -78,7 +74,7 @@ def create_vector_db(df, collection_name, batch_size):
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
-                size=384,  
+                size=encoder.get_sentence_embedding_dimension(),  
                 distance=Distance.COSINE
             )
         )
@@ -87,7 +83,7 @@ def create_vector_db(df, collection_name, batch_size):
         logger.warning(f"Collection already exists or error: {e}")
 
     points = []
-    texts = df['combined_text'].tolist()
+    texts = df['combined'].tolist()
     
     logger.info(f"Encoding {len(texts)} documents...")
     embeddings = encoder.encode(
@@ -115,7 +111,7 @@ def create_vector_db(df, collection_name, batch_size):
     client.upload_points(
         collection_name=collection_name,
         points=points,
-        batch_size=43,
+        batch_size=64,
         parallel=4,
         wait=True,
     )
