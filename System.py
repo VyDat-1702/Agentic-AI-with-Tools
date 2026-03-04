@@ -86,7 +86,6 @@ MANDATORY RULES:
 - ARGUMENTS must be valid JSON with double quotes
 - If PAST TOOL OBSERVATIONS contains relevant results → ANSWER NOW, don't call tools again
 - Each tool should only be called ONCE per query unless you get an error
-- Always end ANSWER with: " This is for informational purposes only. Please consult a healthcare professional for medical advice."
 """
 
 
